@@ -1,6 +1,6 @@
 # Image2Event
 
-<img src="BGM.png" alt="BGM" style="zoom: 33%;" />
+<img src="Taxi.Driver.1976.HR-HDTV.jpg" alt="BGM" style="zoom: 33%;" />
 
 Towards unsupervised domain adaptation on event data via labeled image data.
 
