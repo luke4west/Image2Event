@@ -1,4 +1,7 @@
 # Image2Event
+
+<img src="BGM.png" alt="BGM" style="zoom: 33%;" />
+
 Towards unsupervised domain adaptation on event data via labeled image data.
 
 ## Training
