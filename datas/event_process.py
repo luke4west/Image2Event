@@ -4,11 +4,7 @@ import os
 import pandas as pd
 import numpy as np
 
-def is_frame_mostly_blank(frame, threshold=50):
-    """
-    Check if a frame is mostly blank by calculating the variance of its pixel values.
-    If the variance is below the threshold, the frame is considered mostly blank.
-    """
+def is_frame_mostly_blank(frame, threshold=55):
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
     variance = np.var(gray_frame)
     return variance < threshold
