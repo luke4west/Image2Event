@@ -2,15 +2,25 @@ import cv2
 import random
 import os
 import pandas as pd
+import numpy as np
+
+def is_frame_mostly_blank(frame, threshold=50):
+    """
+    Check if a frame is mostly blank by calculating the variance of its pixel values.
+    If the variance is below the threshold, the frame is considered mostly blank.
+    """
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
+    variance = np.var(gray_frame)
+    return variance < threshold
 
 video_list = []
-for root, dirs, files in os.walk("/data/LateOrchestration/Event_Domain_Adaptation/event_data", topdown=False):
+for root, dirs, files in os.walk("/home/ruiyang/Projects/v2e/Image2Event/data/LateOrchestration/Event_Domain_Adaptation/event_data", topdown=False):
     for name in files:
         if name.endswith("dvs-video.avi"):
             print(os.path.join(root, name))
             video_list.append(os.path.join(root, name))
 
-save_path = "/data/LateOrchestration/Event_Domain_Adaptation/event_images"
+save_path = "/home/ruiyang/Projects/v2e/Image2Event/data/LateOrchestration/Event_Domain_Adaptation/event_images"
 os.makedirs(save_path, exist_ok=True)
 
 # 设置随机种子
@@ -51,10 +61,11 @@ for idx, video_file in enumerate(video_list):
                 print("Error: Failed to read frame.")
                 break
 
-            # 这里可以对每一帧进行处理，例如保存为图像文件
-            cv2.imwrite(f"{save_path}/video_{idx}_frame_{frame_count}.png", frame)
-            event_data_list.append(f"event_images/video_{idx}_frame_{frame_count}.png")
-            # print(frame.shape)
+            # Check if the frame is mostly blank
+            if not is_frame_mostly_blank(frame, threshold=50):
+                image_path = f"{save_path}/video_{idx}_frame_{frame_count}.png"
+                cv2.imwrite(image_path, frame)
+                event_data_list.append(f"event_images/video_{idx}_frame_{frame_count}.png")
 
         frame_count += 1
 
@@ -65,4 +76,4 @@ for idx, video_file in enumerate(video_list):
 
 event_df = pd.DataFrame()
 event_df["event"] = event_data_list
-event_df.to_csv("/data/LateOrchestration/Event_Domain_Adaptation/event_data.csv", index=False)
+event_df.to_csv("/home/ruiyang/Projects/v2e/Image2Event/data/LateOrchestration/Event_Domain_Adaptation/event_data.csv", index=False)
