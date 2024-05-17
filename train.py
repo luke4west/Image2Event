@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 import cv2
 from PIL import Image, ImageOps, ImageDraw
 import timm
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 num_gpus = torch.cuda.device_count()
 print("available GPUs: ", num_gpus)
@@ -35,7 +37,7 @@ assert backbone_name in ["dla60_res2net",]
 
 def load_config():
     parser = argparse.ArgumentParser(description='PWS OCTA')
-    parser.add_argument('--src_path', type=str, default="/data/LateOrchestration/Event_Domain_Adaptation/")
+    parser.add_argument('--src_path', type=str, default="./data/LateOrchestration/Event_Domain_Adaptation/")
 
     parser.add_argument(
         "-j",
@@ -122,7 +124,7 @@ def collate_fn(batch):
     return imgs, events, batch_hms, batch_whs, batch_regs, batch_reg_masks
 
 
-def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args):
+def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args, writer):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses_task1 = AverageMeter("task1", ":.4f")
@@ -177,9 +179,16 @@ def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args)
                 losses_gen.update(loss_gen.item(), images.size(0))
                 
                 loss = loss_task_1 + loss_task_2 + loss_gen
-                
+
+                writer.add_scalar('Training/Total Loss', loss.item(), epoch * len(train_loader) + i)
+                writer.add_scalar('Training/Task_1 Loss', loss_task_1.item(), epoch * len(train_loader) + i)
+                writer.add_scalar('Training/Taks_2 Loss', loss_task_2.item(), epoch * len(train_loader) + i)
+                writer.add_scalar('Training/Generation Loss', loss_gen.item(), epoch * len(train_loader) + i)
+                writer.add_scalar('Training/Discriminator Loss', loss_disc.item(), epoch * len(train_loader) + i)
+
                 loss.backward()
                 optimizer_G.step()
+
         
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -189,7 +198,7 @@ def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args)
             progress.display(i)
 
 
-def validate(val_loader, model, criterion, epoch, args,):
+def validate(val_loader, model, criterion, epoch, args, writer):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses_task1 = AverageMeter("task1", ":.4f")
@@ -236,6 +245,12 @@ def validate(val_loader, model, criterion, epoch, args,):
             
             total_loss = loss_disc + loss_gen + loss_task_1 + loss_task_2
             losses.update(total_loss.item(), images.size(0))
+
+            writer.add_scalar('Validation/Total Loss', total_loss.item(), epoch * len(val_loader) + i)
+            writer.add_scalar('Validation/Task_1 Loss', loss_task_1.item(), epoch * len(val_loader) + i)
+            writer.add_scalar('Validation/Taks_2 Loss', loss_task_2.item(), epoch * len(val_loader) + i)
+            writer.add_scalar('Validation/Generation Loss', loss_gen.item(), epoch * len(val_loader) + i)
+            writer.add_scalar('Validation/Discriminator Loss', loss_disc.item(), epoch * len(val_loader) + i)
             
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -548,13 +563,20 @@ def main(args):
         criterion = criterion.to(device)
 
     if not args.evaluation:
+        current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        log_dir = 'checkpoints/log'
+        if os.path.exists(log_dir):
+            shutil.rmtree(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=log_dir,comment=f'{current_time}')
+
         for epoch in range(start_epoch, args.epochs + 1):
             print("Training Phase:")
-            train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args)
+            train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args, writer)
             
             if epoch > 4:
                 print("Testing Phase:")
-                test_score = validate(val_loader, model, criterion, epoch, args)
+                test_score = validate(val_loader, model, criterion, epoch, args, writer)
                 print("# test score = {:.4f}".format(test_score))
 
                 is_best = test_score < best_score
