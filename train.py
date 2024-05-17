@@ -19,18 +19,19 @@ import torchvision.transforms as transforms
 
 import matplotlib.pyplot as plt
 import cv2
-
+from PIL import Image, ImageOps, ImageDraw
 import timm
 
 num_gpus = torch.cuda.device_count()
 print("available GPUs: ", num_gpus)
-device_index = 3
+device_index = 0
 device = torch.device(f"cuda:{device_index}" if torch.cuda.is_available() else "cpu")
 print("current device: ", device)
 
 input_size = 448
 backbone_name = "dla60_res2net"
-assert backbone_name in ["dla60_res2net", "resnet18"]
+assert backbone_name in ["dla60_res2net",]
+
 
 def load_config():
     parser = argparse.ArgumentParser(description='PWS OCTA')
@@ -251,6 +252,7 @@ def inference(test_loader, model, epoch, args, save_path):
     model.eval()
     
     save_dir = "{}/epoch_{}".format(save_path, epoch)
+    os.makedirs(save_dir, exist_ok=True)
     
     with torch.no_grad():
         for i, (images, events, hm, wh, offset, mask) in enumerate(test_loader):
@@ -262,8 +264,108 @@ def inference(test_loader, model, epoch, args, save_path):
                 offset = offset.to(device)
                 mask = mask.to(device)
             
-            outputs1, outputs2, fake_events = model.detection_step_fake_event(images, events)
+            outputs_images, outputs_fake_events, fake_events = model.detection_step_fake_event(images, events)
+            outputs_events = model.detection_step_event(events)
             
+            for detect_inputs, detect_outputs, suffix_ in zip([images, events, fake_events], [outputs_images, outputs_events, outputs_fake_events], ["image", "event", "fake"]):
+                decode_bboxes(detect_inputs, detect_outputs, "{}/{}_{}.png".format(save_dir, i, suffix_))
+
+
+def _nms(heat, kernel=3):
+    hmax = F.max_pool2d(heat, kernel, stride=1, padding=(kernel - 1) // 2)
+    keep = (hmax == heat).float()
+    return heat * keep
+
+
+def get_peak_points(heatmaps):
+    """
+    :param heatmaps: numpy array (N,15,96,96)
+    :return:numpy array (N,15,2)
+    """
+    N, C, H, W = heatmaps.shape
+    all_peak_points = []
+    for i in range(N):
+        peak_points = []
+        for j in range(C):
+            yy, xx = np.where(heatmaps[i, j] == heatmaps[i, j].max())
+            y = yy[0]
+            x = xx[0]
+            peak_points.append([x, y])
+        all_peak_points.append(peak_points)
+    all_peak_points = np.array(all_peak_points)
+    return all_peak_points
+
+
+def coordinate_transform(x, y, src_x, src_y, target_x, target_y, mode='bi-linear'):
+    assert mode in ['bi-linear', 'scale']
+    if mode == 'scale':
+        y_ = (target_y / src_y) * y
+        x_ = (target_x / src_x) * x
+    else:
+        y_ = (target_y / src_y) * (y + 0.5) - 0.5
+        x_ = (target_x / src_x) * (x + 0.5) - 0.5
+    
+    return int(x_), int(y_)
+
+
+def decode_bboxes(inputs, outputs, save_path):
+    batch_size = inputs.shape[0]
+    assert batch_size == 1
+    
+    # input: tensor --> image
+    if inputs.shape[1] == 3:
+        input_array = inputs.detach().cpu().squeeze(0).permute(1, 2, 0).numpy()
+        image = (input_array * 255.).astype(np.uint8)
+        rgb_image = Image.fromarray(image).convert("RGB")
+    else:
+        input_array = inputs.detach().cpu().squeeze(0).squeeze(0).numpy()
+        image = (input_array * 255.).astype(np.uint8)
+        gray_image = Image.fromarray(image).convert("L")
+        rgb_image = ImageOps.colorize(gray_image, (0, 0, 0), (255, 255, 255))
+        
+    rgb_image = rgb_image.resize((input_size, input_size))
+    
+    # outputs: drawing bbox on image
+    hm, wh, _ = outputs
+    hm, wh = hm.detach().cpu(), wh.detach().cpu().squeeze(0)
+    
+    # 非极大值抑制
+    hm = _nms(hm)
+    # 提取中心点
+    peak_points = get_peak_points(hm).squeeze(0)  # [K, 2]
+    
+    # 提取wh
+    # wh.shape: [2, 112, 112]
+    
+    # 目前，hm提取的中心点和宽高信息都是基于特征图尺寸的
+    
+    # 创建一个可绘制对象
+    draw = ImageDraw.Draw(rgb_image)
+        
+    for k, bbox_color in zip([0, 1], ["blue", "red"]):
+        x_ct, y_ct = peak_points[k]
+        w, h = wh[0, y_ct, x_ct], wh[1, y_ct, x_ct]
+        
+        # 变换到输入尺寸
+        half_w = int(w * 4 / 2)
+        half_h = int(h * 4 / 2)
+        
+        x_ct, y_ct = coordinate_transform(x_ct, y_ct,
+                                          int(input_size / 4), int(input_size / 4),
+                                          input_size, input_size)
+        
+        
+
+        # 定义矩形框的坐标
+        x1, y1 = max(x_ct - half_w, 0), max(y_ct - half_h, 0)
+        x2, y2 = min(x_ct + half_w, input_size), min(y_ct + half_h, input_size)
+
+        # 绘制矩形框
+        draw.rectangle([(x1, y1), (x2, y2)], outline=bbox_color, width=2)
+
+    # 保存绘制后的图像
+    rgb_image.save(save_path)
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -435,6 +537,7 @@ def main(args):
         checkpoints = torch.load("{}/best_model.pth.tar".format(checkpoint_path), 'cpu')
         # checkpoints = torch.load("{}/amp_checkpoint.pt".format(checkpoint_path), 'cpu')
         model.load_state_dict(checkpoints['state_dict'])
+        print("# loaded checkpoint from: ", "{}/best_model.pth.tar".format(checkpoint_path))
         # test_score_1, test_score_2 = checkpoints['best_prec1']
         # print("# dice score = {:.4f}, iou score = {:.4f} ".format(test_score_1, test_score_2))
 
@@ -466,9 +569,9 @@ def main(args):
                 # inference(test_loader, model, epoch, args, save_path)
 
     else:
-        test_score = validate(val_loader, model, criterion, epoch, args)
-        print("# test score = {:.4f}".format(test_score))
-        # inference(test_loader, model, criterion, "best", args, save_path)
+        # test_score = validate(val_loader, model, criterion, 1, args)
+        # print("# test score = {:.4f}".format(test_score))
+        inference(test_loader, model, "best", args, save_path)
 
 
 if __name__ == '__main__':
