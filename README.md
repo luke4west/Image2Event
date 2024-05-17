@@ -26,4 +26,4 @@ Results stored in the "Inference" directory.
 tensorboard --logdir ./checkpoints/log/
 ```
 
-To visualize training progress with TensorBoard, use the following command:
+To visualize training progress with TensorBoard, use the above command:
