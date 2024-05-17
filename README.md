@@ -15,7 +15,7 @@ Default network setting is res2net (or resnet18) as Backbone, FPN as Detection H
 ## Inference
 
 ```python
-python train.py --resume "ckpt_path" -e
+python train.py -e
 ```
 
 Results stored in the "Inference" directory.
