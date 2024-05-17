@@ -2,7 +2,7 @@
 
 <img src="Taxi.Driver.1976.HR-HDTV.jpg" alt="BGM" style="zoom: 33%;" />
 
-Towards unsupervised domain adaptation on event data via labeled image data.
+Towards unsupervised domain adaptation on event data.
 
 ## Training
 
@@ -10,7 +10,7 @@ Towards unsupervised domain adaptation on event data via labeled image data.
 python train.py
 ```
 
-Default network setting is res2net (or resnet18) as Backbone, FPN as Detection Head, FCN as Upsampling & Downsampling Decoder.
+Default network setting is res2net as Backbone, FPN as Detection Head, FCN as Upsampling & Downsampling Decoder.
 
 ## Inference
 
@@ -18,7 +18,7 @@ Default network setting is res2net (or resnet18) as Backbone, FPN as Detection H
 python train.py -e
 ```
 
-Results stored in the "Inference" directory.
+Detection results will be stored in the "Inference" directory.
 
 ## Using TensorBoard
 
