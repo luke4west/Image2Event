@@ -67,6 +67,7 @@ class FrameEventData(Dataset):
     def __init__(self, src_path, ann_file, img_transform, gt_size, num_classes=2):
         self.src_path = src_path
         # self.ann = pd.read_csv(self.src_path + ann_file)
+        # load json file
         with open(self.src_path + ann_file, 'r') as json_file:
             ann = json.load(json_file)
         
@@ -103,7 +104,7 @@ class FrameEventData(Dataset):
             
             ann_file_list = info["annotations"][class_id]
             class_id = int(class_id)
-            
+            # one class may corresponds to multiple bboxes
             class_hm = torch.zeros((1, self.gt_size, self.gt_size))
             for ann_file in ann_file_list:
                 
