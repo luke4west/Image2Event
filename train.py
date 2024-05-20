@@ -9,6 +9,7 @@ import warnings
 import pandas as pd
 import numpy as np
 from prettytable import PrettyTable
+from datetime import datetime
 
 import torch
 import torch.nn as nn
@@ -21,8 +22,6 @@ import matplotlib.pyplot as plt
 import cv2
 from PIL import Image, ImageOps, ImageDraw
 import timm
-from torch.utils.tensorboard import SummaryWriter
-from datetime import datetime
 
 num_gpus = torch.cuda.device_count()
 print("available GPUs: ", num_gpus)
@@ -35,9 +34,22 @@ backbone_name = "dla60_res2net"
 assert backbone_name in ["dla60_res2net",]
 
 
+# helper function to show an image
+# (used in the `plot_classes_preds` function below)
+def matplotlib_imshow(img, one_channel=False):
+    if one_channel:
+        img = img.mean(dim=0)
+    img = img / 2 + 0.5     # unnormalize
+    npimg = img.numpy()
+    if one_channel:
+        plt.imshow(npimg, cmap="Greys")
+    else:
+        plt.imshow(np.transpose(npimg, (1, 2, 0)))
+        
+
 def load_config():
     parser = argparse.ArgumentParser(description='PWS OCTA')
-    parser.add_argument('--src_path', type=str, default="./data/LateOrchestration/Event_Domain_Adaptation/")
+    parser.add_argument('--src_path', type=str, default="/data/LateOrchestration/Event_Domain_Adaptation/")
 
     parser.add_argument(
         "-j",
@@ -124,7 +136,7 @@ def collate_fn(batch):
     return imgs, events, batch_hms, batch_whs, batch_regs, batch_reg_masks
 
 
-def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args, writer):
+def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses_task1 = AverageMeter("task1", ":.4f")
@@ -179,16 +191,9 @@ def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args,
                 losses_gen.update(loss_gen.item(), images.size(0))
                 
                 loss = loss_task_1 + loss_task_2 + loss_gen
-
-                writer.add_scalar('Training/Total Loss', loss.item(), epoch * len(train_loader) + i)
-                writer.add_scalar('Training/Task_1 Loss', loss_task_1.item(), epoch * len(train_loader) + i)
-                writer.add_scalar('Training/Taks_2 Loss', loss_task_2.item(), epoch * len(train_loader) + i)
-                writer.add_scalar('Training/Generation Loss', loss_gen.item(), epoch * len(train_loader) + i)
-                writer.add_scalar('Training/Discriminator Loss', loss_disc.item(), epoch * len(train_loader) + i)
-
+                
                 loss.backward()
                 optimizer_G.step()
-
         
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -198,7 +203,7 @@ def train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args,
             progress.display(i)
 
 
-def validate(val_loader, model, criterion, epoch, args, writer):
+def validate(val_loader, model, criterion, epoch, args,):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses_task1 = AverageMeter("task1", ":.4f")
@@ -245,12 +250,6 @@ def validate(val_loader, model, criterion, epoch, args, writer):
             
             total_loss = loss_disc + loss_gen + loss_task_1 + loss_task_2
             losses.update(total_loss.item(), images.size(0))
-
-            writer.add_scalar('Validation/Total Loss', total_loss.item(), epoch * len(val_loader) + i)
-            writer.add_scalar('Validation/Task_1 Loss', loss_task_1.item(), epoch * len(val_loader) + i)
-            writer.add_scalar('Validation/Taks_2 Loss', loss_task_2.item(), epoch * len(val_loader) + i)
-            writer.add_scalar('Validation/Generation Loss', loss_gen.item(), epoch * len(val_loader) + i)
-            writer.add_scalar('Validation/Discriminator Loss', loss_disc.item(), epoch * len(val_loader) + i)
             
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -333,6 +332,7 @@ def decode_bboxes(inputs, outputs, save_path):
         image = (input_array * 255.).astype(np.uint8)
         rgb_image = Image.fromarray(image).convert("RGB")
     else:
+        inputs = torch.clamp(inputs, 0, 1)
         input_array = inputs.detach().cpu().squeeze(0).squeeze(0).numpy()
         image = (input_array * 255.).astype(np.uint8)
         gray_image = Image.fromarray(image).convert("L")
@@ -470,7 +470,7 @@ def reg_l1_loss(pred, target, mask):
 def main(args):
     global best_score
     best_score = 100.
-
+    
     suffix_ = "dla60_res2net"
     # save PATH
     checkpoint_path = 'checkpoints/{}'.format(suffix_)
@@ -478,7 +478,7 @@ def main(args):
     
     save_path = 'inference/{}'.format(suffix_)
     os.makedirs(save_path, exist_ok=True)
-
+    
     # Data loading code
     train_transfrom = transforms.Compose([
         # optical_augmentation
@@ -499,24 +499,24 @@ def main(args):
     from datas.data_loader import FrameEventData
     train_dataset = FrameEventData(
         src_path=args.src_path, 
-        ann_file="frame2event_train_dataset.csv", 
+        ann_file="masked_train.json", 
         img_transform=train_transfrom, 
         gt_size=int(input_size/4), 
-        num_classes=2)
+        num_classes=7)
 
     val_dataset = FrameEventData(
         src_path=args.src_path, 
-        ann_file="frame2event_val_dataset.csv", 
+        ann_file="masked_val.json", 
         img_transform=val_transfrom, 
         gt_size=int(input_size/4), 
-        num_classes=2)
+        num_classes=7)
 
     test_dataset = FrameEventData(
         src_path=args.src_path, 
-        ann_file="frame2event_test_dataset.csv", 
+        ann_file="masked_test.json", 
         img_transform=val_transfrom, 
         gt_size=int(input_size/4), 
-        num_classes=2)
+        num_classes=7)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers, drop_last=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=args.workers, collate_fn=collate_fn)
@@ -524,7 +524,7 @@ def main(args):
 
     from models.event_model import Frame2Event
     # create model
-    model = Frame2Event(backbone_name, 2)
+    model = Frame2Event(backbone_name, 7)
 
     from models.loss_func import FocalLoss
     # define loss function (criterion) and optimizer
@@ -563,20 +563,13 @@ def main(args):
         criterion = criterion.to(device)
 
     if not args.evaluation:
-        current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        log_dir = 'checkpoints/log'
-        if os.path.exists(log_dir):
-            shutil.rmtree(log_dir)
-        os.makedirs(log_dir, exist_ok=True)
-        writer = SummaryWriter(log_dir=log_dir,comment=f'{current_time}')
-
         for epoch in range(start_epoch, args.epochs + 1):
             print("Training Phase:")
-            train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args, writer)
+            train(train_loader, model, criterion, optimizer_D, optimizer_G, epoch, args)
             
             if epoch > 4:
                 print("Testing Phase:")
-                test_score = validate(val_loader, model, criterion, epoch, args, writer)
+                test_score = validate(val_loader, model, criterion, epoch, args)
                 print("# test score = {:.4f}".format(test_score))
 
                 is_best = test_score < best_score
