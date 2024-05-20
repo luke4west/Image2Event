@@ -66,7 +66,12 @@ def gaussian_heatmap(X_t, Y_t, target_size, sigma=0.4):
 class FrameEventData(Dataset):
     def __init__(self, src_path, ann_file, img_transform, gt_size, num_classes=2):
         self.src_path = src_path
-        self.ann = pd.read_csv(self.src_path + ann_file)
+        # self.ann = pd.read_csv(self.src_path + ann_file)
+        # load json file
+        with open(self.src_path + ann_file, 'r') as json_file:
+            ann = json.load(json_file)
+        
+        self.ann = ann
         self.img_transform = img_transform
         self.gt_size = gt_size
         self.num_classes = num_classes
@@ -77,29 +82,33 @@ class FrameEventData(Dataset):
     def __getitem__(self, idx):
         if not isinstance(idx, int):
             idx = idx.item()
-        info = self.ann.iloc[idx]
+        info = self.ann[idx]
 
-        image_file = str(info["image"])        
+        image_file = str(info["img file"])        
         img = Image.open(self.src_path + image_file).convert('RGB')
         img_tensor = self.img_transform(img)
         
-        event_file = str(info["event"])        
+        event_file = str(info["event path"])        
         event = Image.open(self.src_path + event_file).convert('L')
         event_tensor = self.img_transform(event)
             
         image_width = float(img.size[0])
         image_height = float(img.size[1])
         
-        hm = []
+        hm = torch.zeros((self.num_classes, self.gt_size, self.gt_size))
         wh = torch.zeros((2, self.gt_size, self.gt_size))
         offset = torch.zeros((2, self.gt_size, self.gt_size))
         mask = torch.zeros((1, self.gt_size, self.gt_size))
         
-        for class_id in range(1, self.num_classes+1):
-            ann_file = image_file.replace("left_frames", "annotations").replace(".png", "") + "_{}.json".format(class_id)
-            ann_path = self.src_path + ann_file
-            # print(ann_path)
-            if os.path.exists(ann_path):
+        for class_id in info["annotations"].keys():
+            
+            ann_file_list = info["annotations"][class_id]
+            class_id = int(class_id)
+            # one class may corresponds to multiple bboxes
+            class_hm = torch.zeros((1, self.gt_size, self.gt_size))
+            for ann_file in ann_file_list:
+                
+                ann_path = self.src_path + ann_file
                 with open(ann_path, "r") as ann_json:
                     ann_data = json.load(ann_json)
                 
@@ -124,7 +133,7 @@ class FrameEventData(Dataset):
                 
                 soft_gt = gaussian_heatmap([ct_x], [ct_y], self.gt_size, sigma=1.0)  # 1, 128, 128
                 
-                hm.append(soft_gt)
+                class_hm += soft_gt
                 
                 wh[0, ct_y, ct_x] = w_scale
                 wh[1, ct_y, ct_x] = h_scale
@@ -134,10 +143,7 @@ class FrameEventData(Dataset):
                 
                 mask[0, ct_y, ct_x] = 1.0
                 
-            else:
-                hm.append(torch.zeros((1, self.gt_size, self.gt_size)))
-        
-        hm = torch.cat(hm, dim=0) # K, 128, 128
-        
+            hm[class_id:class_id+1, :, :] = class_hm
+                
         return img_tensor, event_tensor, hm, wh, offset, mask
 
