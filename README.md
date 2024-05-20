@@ -2,8 +2,6 @@
 
 <img src="Taxi.Driver.1976.HR-HDTV.jpg" alt="BGM" style="zoom: 33%;" />
 
-<img src="The.Darjeeling.Limited.2007.BD-1080p.1920X1080.png" alt="BGM" style="zoom: 33%;" />
-
 Towards unsupervised domain adaptation on event data.
 
 ## Training
